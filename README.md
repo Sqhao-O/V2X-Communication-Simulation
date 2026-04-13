@@ -1,9 +1,8 @@
-<<<<<<< HEAD
 # V2X-Communication-Simulation
-=======
+
 # 车联网鲁棒资源分配算法 — 项目文档
 
-> 本项目为毕业论文《车联网中基于延迟CSI的鲁棒资源分配算法》的MATLAB仿真代码。
+> 本项目为我的本科毕业论文的MATLAB仿真代码，水平一般请见谅。
 > 论文研究D2D车联网中，CSI存在反馈延迟时的鲁棒资源分配问题。
 
 ---
@@ -1183,4 +1182,3 @@ gamma0_effective = gamma0 * 10^((margin_dB + p0_factor) / 10);
 | 仿真3（密度影响） | 0.14% ~ 0.16% | 60% ~ 65% | 400倍 |
 
 这些结果验证了工程实现在控制中断概率方面的有效性，同时保持了与非鲁棒算法相当的V2I容量性能。
->>>>>>> bb6651c (Initial commit: MATLAB simulation project)
