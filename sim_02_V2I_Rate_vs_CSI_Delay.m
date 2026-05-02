@@ -77,7 +77,7 @@ laneWidth = 4;
 
 r0 = 0.5;           % V2I 最低速率要求（bps/Hz）
 dB_gamma0 = 5;     % V2V 最低 SINR 阈值（dB）
-p0 = 1e-6;         % V2V 目标中断概率（与 sim_01/sim_03 保持一致）
+p0 = 1e-4;         % V2V 目标中断概率（Markov 上界设计值）
 
 %% =================================================================
 %%  线性参数转换
@@ -182,6 +182,8 @@ for v_idx = 1 : length(v_list)
             %% ------ 鲁棒算法 ------
             % 遍历所有 CUE-DUE 对，计算功率分配和 V2I 容量
             C_mk = zeros(numCUE, numDUE);
+            Pd_mk_robust = zeros(numCUE, numDUE);
+            Pc_mk_robust = zeros(numCUE, numDUE);
             for m = 1 : numCUE
                 g_mB = alpha_mB_(m) * abs(h_mB_(m))^2;  % CUE→基站信道增益
                 for k = 1 : numDUE
@@ -191,6 +193,9 @@ for v_idx = 1 : length(v_list)
                     [Pd_opt, Pc_opt] = calOptPower(1e-6, sig2, Pc_max, Pd_max, ...
                         alpha_k_(k), alpha_mk_(m, k), epsi_k, epsi_mk, ...
                         h_k_(m, k), h_mk_(m, k), p0, gamma0);
+
+                    Pd_mk_robust(m, k) = Pd_opt;
+                    Pc_mk_robust(m, k) = Pc_opt;
 
                     % V2I 容量（bps/Hz）
                     C_mk(m, k) = log2(1 + Pc_opt * g_mB / (sig2 + Pd_opt * g_kB));
@@ -204,14 +209,34 @@ for v_idx = 1 : length(v_list)
 
             % Hungarian 最优配对
             [assign_robust, cost_r] = munkres(-C_mk);
-            % 计算该信道实现下所有有效配对的 V2I 容量之和
-            [sumR_robust_ch, minR_robust_ch] = sumAndMin(C_mk, assign_robust);
-            if sumR_robust_ch > 0  % 有效配对存在
-                sumR_robust = sumR_robust + sumR_robust_ch;
+            % 计算有效V2I容量（仅计入V2V未中断的配对）
+            valid_r = find(assign_robust > 0);
+            sumR_robust_ch = 0;
+            for pp = 1 : length(valid_r)
+                m_r = valid_r(pp);
+                k_r = assign_robust(m_r);
+                Pd_r = Pd_mk_robust(m_r, k_r);
+                Pc_r = Pc_mk_robust(m_r, k_r);
+                % 采样实际V2V信道，检查是否中断
+                ek_r = sqrt(1 - epsi_k^2) * (randn + 1j*randn) / sqrt(2);
+                emk_r = sqrt(1 - epsi_mk^2) * (randn + 1j*randn) / sqrt(2);
+                hk_act = epsi_k * h_k_(m_r, k_r) + ek_r;
+                hmk_act = epsi_mk * h_mk_(m_r, k_r) + emk_r;
+                sinr_act = Pd_r * alpha_k_(k_r) * abs(hk_act)^2 ...
+                    / (sig2 + Pc_r * alpha_mk_(m_r, k_r) * abs(hmk_act)^2);
+                if sinr_act >= gamma0  % V2V未中断，计入V2I容量
+                    g_mB = alpha_mB_(m_r) * abs(h_mB_(m_r))^2;
+                    g_kB = alpha_kB_(k_r) * abs(h_kB_(m_r, k_r))^2;
+                    cap = log2(1 + Pc_r * g_mB / (sig2 + Pd_r * g_kB));
+                    sumR_robust_ch = sumR_robust_ch + cap;
+                end
             end
+            sumR_robust = sumR_robust + max(0, sumR_robust_ch);
 
             %% ------ 非鲁棒算法 ------
             C_mk = zeros(numCUE, numDUE);
+            Pd_mk_nonrobust = zeros(numCUE, numDUE);
+            Pc_mk_nonrobust = zeros(numCUE, numDUE);
             for m = 1 : numCUE
                 g_mB = alpha_mB_(m) * abs(h_mB_(m))^2;
                 for k = 1 : numDUE
@@ -221,6 +246,9 @@ for v_idx = 1 : length(v_list)
                     [Pd_opt_nr, Pc_opt_nr] = calOptPower_nonrobust(sig2, Pc_max, Pd_max, ...
                         alpha_k_(k), alpha_mk_(m, k), h_k_(m, k), h_mk_(m, k), gamma0);
 
+                    Pd_mk_nonrobust(m, k) = Pd_opt_nr;
+                    Pc_mk_nonrobust(m, k) = Pc_opt_nr;
+
                     C_mk(m, k) = log2(1 + Pc_opt_nr * g_mB / (sig2 + Pd_opt_nr * g_kB));
                     if C_mk(m, k) < r0
                         C_mk(m, k) = -infty;
@@ -229,10 +257,29 @@ for v_idx = 1 : length(v_list)
             end
 
             [assign_nonrobust, cost_nr] = munkres(-C_mk);
-            [sumR_nonrobust_ch, minR_nonrobust_ch] = sumAndMin(C_mk, assign_nonrobust);
-            if sumR_nonrobust_ch > 0
-                sumR_nonrobust = sumR_nonrobust + sumR_nonrobust_ch;
+            % 计算有效V2I容量（仅计入V2V未中断的配对）
+            valid_nr = find(assign_nonrobust > 0);
+            sumR_nonrobust_ch = 0;
+            for pp = 1 : length(valid_nr)
+                m_nr = valid_nr(pp);
+                k_nr = assign_nonrobust(m_nr);
+                Pd_nr = Pd_mk_nonrobust(m_nr, k_nr);
+                Pc_nr = Pc_mk_nonrobust(m_nr, k_nr);
+                % 采样实际V2V信道，检查是否中断
+                ek_nr = sqrt(1 - epsi_k^2) * (randn + 1j*randn) / sqrt(2);
+                emk_nr = sqrt(1 - epsi_mk^2) * (randn + 1j*randn) / sqrt(2);
+                hk_act_nr = epsi_k * h_k_(m_nr, k_nr) + ek_nr;
+                hmk_act_nr = epsi_mk * h_mk_(m_nr, k_nr) + emk_nr;
+                sinr_act_nr = Pd_nr * alpha_k_(k_nr) * abs(hk_act_nr)^2 ...
+                    / (sig2 + Pc_nr * alpha_mk_(m_nr, k_nr) * abs(hmk_act_nr)^2);
+                if sinr_act_nr >= gamma0  % V2V未中断，计入V2I容量
+                    g_mB = alpha_mB_(m_nr) * abs(h_mB_(m_nr))^2;
+                    g_kB = alpha_kB_(k_nr) * abs(h_kB_(m_nr, k_nr))^2;
+                    cap = log2(1 + Pc_nr * g_mB / (sig2 + Pd_nr * g_kB));
+                    sumR_nonrobust_ch = sumR_nonrobust_ch + cap;
+                end
             end
+            sumR_nonrobust = sumR_nonrobust + max(0, sumR_nonrobust_ch);
 
             cntChannLs = cntChannLs + 1;
         end
@@ -244,159 +291,84 @@ for v_idx = 1 : length(v_list)
 end
 
 %% =================================================================
-%%  绘图（学术规范，双列子图展示）
+%%  保存仿真数据（供 thesis_figures.m 重绘）
+%% =================================================================
+save(fullfile(outputFolder, 'sim_02_data.mat'), ...
+    'T_list', 'v_list', 'sumRate_robust', 'sumRate_nonrobust', 'channNum');
+
+%% =================================================================
+%%  绘图（学术规范，单图展示鲁棒vs非鲁棒）
 %% =================================================================
 LineWidth = 1.5;
 MarkerSize = 7;
-FontSize = 12;
-FontName = 'SimHei';  % 中文黑体
+FontSize = 10.5;
+FontName = 'SimSun';  % 宋体（毕设规范）
 
 % 配色方案（学术规范）
 colors = [0.0 0.45 0.75; 0.05 0.05 0.05; 0.0 0.6 0.3];  % 蓝、黑、绿
 markers = {'o', 's', '^'};  % 圆形、方形、三角形
 
-% 创建双列子图（增大尺寸）
-fig = figure('Position', [100, 80, 1800, 650]);
+% 创建单张图（鲁棒vs非鲁棒在同一图中对比）
+fig = figure('Position', [100, 80, 1000, 700]);
 set(gcf, 'Color', 'white', 'PaperUnits', 'centimeters');
-set(gcf, 'PaperSize', [32 12], 'PaperPosition', [0.5 0.5 31 11]);
+set(gcf, 'PaperSize', [20 14], 'PaperPosition', [0.5 0.5 19 13]);
 
-% ==================================================================
-%  子图(a)：非鲁棒算法（展示性能下降）
-% ==================================================================
-ax1 = subplot(1, 2, 1);
-set(ax1, 'FontName', FontName, 'FontSize', FontSize + 1, 'TickDir', 'in', ...
+ax = axes('Parent', fig);
+set(ax, 'FontName', FontName, 'FontSize', FontSize + 1, 'TickDir', 'in', ...
     'Color', 'white', 'GridAlpha', 0.3, 'GridColor', [0.5 0.5 0.5], ...
     'MinorGridAlpha', 0.1, 'MinorGridColor', [0.7 0.7 0.7], ...
     'XMinorTick', 'on', 'YMinorTick', 'on', 'TickLength', [0.015 0.015]);
-grid(ax1, 'on'); grid(ax1, 'minor'); hold(ax1, 'on');
+grid(ax, 'on'); grid(ax, 'minor'); hold(ax, 'on');
 
-% -----------------------------------------------------------------
-% 对非鲁棒算法仿真结果进行3次多项式拟合 + 强制单调递减约束
-% 理论依据：T增大 → 信道相关性减弱 → 估计误差增大 → 性能单调下降
-% v=50: 基本不变（信道相关性强）；v=100: 中等下降；v=150: 急剧下降
-% -----------------------------------------------------------------
-sumRate_nonrobust_fit = zeros(length(v_list), length(T_list));
-for v_idx = 1 : length(v_list)
-    y_raw = sumRate_nonrobust(v_idx, :);
-    x_pts = 1 : length(T_list);
-
-    % 3次多项式拟合
-    p = polyfit(x_pts, y_raw, 3);
-    y_fit = polyval(p, x_pts);
-
-    % 强制单调递减：从第二个点开始，每个点不能高于前一个点
-    for i = 2 : length(y_fit)
-        y_fit(i) = min(y_fit(i), y_fit(i-1));
-    end
-
-    % 按车速施加不同程度衰减（归一化x: 0→1代表T从最小到最大）
-    x_norm = (x_pts - 1) / (length(T_list) - 1);  % 0~1
-    if v_idx == 1
-        % v=50: 轻微下降（约5%）
-        target_drop = 0.05;
-    elseif v_idx == 2
-        % v=100: 中等下降（约15%）
-        target_drop = 0.15;
-    else
-        % v=150: 急剧下降（约35%）
-        target_drop = 0.35;
-    end
-    initial_val = y_fit(1);
-    target_final = initial_val * (1 - target_drop);
-    y_fit = initial_val - (initial_val - target_final) * x_norm;
-
-    sumRate_nonrobust_fit(v_idx, :) = y_fit;
-end
-
-% 绘制非鲁棒算法3条线（实线+填充标记）
+% 绘制鲁棒算法（实线+填充标记）
+h_legend = [];
+legend_str = {};
 for v_idx = 1 : length(v_list)
     c = colors(v_idx, :);
     mkr = markers{v_idx};
-    plot(ax1, T_list, sumRate_nonrobust_fit(v_idx, :), [mkr, '-'], ...
+    h = plot(ax, T_list, sumRate_robust(v_idx, :), [mkr, '-'], ...
         'LineWidth', LineWidth, 'MarkerSize', MarkerSize + 1, ...
         'MarkerFaceColor', c, 'Color', c);
+    h_legend = [h_legend, h];
+    legend_str{end+1} = sprintf('鲁棒, v=%d km/h', v_list(v_idx));
 end
 
-xlabel('CSI反馈周期 T (ms)', 'FontName', FontName, 'FontSize', FontSize + 2, 'FontWeight', 'bold');
-ylabel('V2I总吞吐量 (bps/Hz)', 'FontName', FontName, 'FontSize', FontSize + 2, 'FontWeight', 'bold');
-xlim([0, 5]);
-ylim([0, 280]);
-
-legend(ax1, {'v = 50 km/h', 'v = 100 km/h', 'v = 150 km/h'}, ...
-    'FontName', FontName, 'FontSize', FontSize, ...
-    'Location', 'southwest', 'Box', 'off');
-title(ax1, {'(a) 非鲁棒算法', '高速场景下随T增大性能急剧下降'}, ...
-    'FontName', FontName, 'FontSize', FontSize + 2);
-hold(ax1, 'off');
-
-% ==================================================================
-%  子图(b)：鲁棒算法（展示性能平稳）
-% ==================================================================
-ax2 = subplot(1, 2, 2);
-set(ax2, 'FontName', FontName, 'FontSize', FontSize + 1, 'TickDir', 'in', ...
-    'Color', 'white', 'GridAlpha', 0.3, 'GridColor', [0.5 0.5 0.5], ...
-    'MinorGridAlpha', 0.1, 'MinorGridColor', [0.7 0.7 0.7], ...
-    'XMinorTick', 'on', 'YMinorTick', 'on', 'TickLength', [0.015 0.015]);
-grid(ax2, 'on'); grid(ax2, 'minor'); hold(ax2, 'on');
-
-% -----------------------------------------------------------------
-% 对鲁棒算法仿真结果进行3次多项式拟合，获得平滑趋势
-% 鲁棒算法对CSI延迟不敏感，曲线应基本水平
-% -----------------------------------------------------------------
-sumRate_robust_fit = zeros(length(v_list), length(T_list));
-for v_idx = 1 : length(v_list)
-    y_raw = sumRate_robust(v_idx, :);
-    x_pts = 1 : length(T_list);
-
-    % 2次多项式拟合（曲线更平缓）
-    p = polyfit(x_pts, y_raw, 2);
-    y_fit = polyval(p, x_pts);
-
-    % 轻微平滑约束：限制波动范围在±5以内
-    y_mean = mean(y_fit);
-    y_fit = max(y_mean - 5, min(y_mean + 5, y_fit));
-
-    sumRate_robust_fit(v_idx, :) = y_fit;
-end
-
-% 绘制鲁棒算法3条线（虚线+空心标记）
+% 绘制非鲁棒算法（虚线+空心标记）
 for v_idx = 1 : length(v_list)
     c = colors(v_idx, :);
     mkr = markers{v_idx};
-    plot(ax2, T_list, sumRate_robust_fit(v_idx, :), [mkr, '--'], ...
+    h = plot(ax, T_list, sumRate_nonrobust(v_idx, :), [mkr, '--'], ...
         'LineWidth', LineWidth, 'MarkerSize', MarkerSize + 1, ...
         'MarkerFaceColor', 'none', 'MarkerEdgeColor', c, 'Color', c);
+    h_legend = [h_legend, h];
+    legend_str{end+1} = sprintf('非鲁棒, v=%d km/h', v_list(v_idx));
 end
 
-xlabel('CSI反馈周期 T (ms)', 'FontName', FontName, 'FontSize', FontSize + 2, 'FontWeight', 'bold');
-ylabel('V2I总吞吐量 (bps/Hz)', 'FontName', FontName, 'FontSize', FontSize + 2, 'FontWeight', 'bold');
+xlabel('CSI反馈周期 T (ms)', 'FontName', FontName, 'FontSize', FontSize);
+ylabel('有效V2I总吞吐量 (bps/Hz)', 'FontName', FontName, 'FontSize', FontSize);
 xlim([0, 5]);
-ylim([0, 280]);  % 与左图保持相同Y轴范围，便于对比
+ylim([0, max(max(sumRate_robust(:)), max(sumRate_nonrobust(:))) * 1.2]);
 
-legend(ax2, {'v = 50 km/h', 'v = 100 km/h', 'v = 150 km/h'}, ...
-    'FontName', FontName, 'FontSize', FontSize, ...
+legend(ax, h_legend, legend_str, ...
+    'FontName', FontName, 'FontSize', 9, ...
     'Location', 'northeast', 'Box', 'off');
-title(ax2, {'(b) 鲁棒算法', '不同车速下吞吐量基本保持平稳'}, ...
-    'FontName', FontName, 'FontSize', FontSize + 2);
-hold(ax2, 'off');
 
-% 全局标题
-sgtitle({'CSI反馈周期对V2I吞吐量的影响'}, ...
-    'FontName', FontName, 'FontSize', FontSize + 3, 'FontWeight', 'bold');
+hold(ax, 'off');
 
 % 输出图像
-print('-dpng', '-r300', fullfile(outputFolder, 'sim_02_V2I_Rate_vs_CSI_Delay.png'));
-print('-dpdf', '-r300', fullfile(outputFolder, 'sim_02_V2I_Rate_vs_CSI_Delay.pdf'));
+setThesisFont(gcf);
+print('-dpng', '-r600', fullfile(outputFolder, 'sim_02_V2I_Rate_vs_CSI_Delay.png'));
+print('-dpdf', '-r600', fullfile(outputFolder, 'sim_02_V2I_Rate_vs_CSI_Delay.pdf'));
 fprintf('图已保存: %s/sim_02_V2I_Rate_vs_CSI_Delay.png / .pdf\n', outputFolder);
 
 %% =================================================================
-%%  打印数值结果（理论趋势数据）
+%%  打印数值结果
 %% =================================================================
-fprintf('\n===== V2I吞吐量结果（多项式拟合平滑）=====\n');
-fprintf('说明：原始仿真数据经3次多项式拟合 + 单调性约束后输出\n');
-disp('非鲁棒算法（拟合平滑）:');
-disp(sumRate_nonrobust_fit);
-disp('鲁棒算法（拟合平滑）:');
-disp(sumRate_robust_fit);
+fprintf('\n===== 有效V2I吞吐量结果 =====\n');
+fprintf('说明：有效V2I吞吐量仅计入V2V未中断的配对\n');
+disp('非鲁棒算法:');
+disp(sumRate_nonrobust);
+disp('鲁棒算法:');
+disp(sumRate_robust);
 
 toc

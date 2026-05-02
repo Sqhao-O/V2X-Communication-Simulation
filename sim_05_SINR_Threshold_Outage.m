@@ -29,8 +29,8 @@ end
 %% =================================================================
 %%  仿真参数配置
 %% ===================================================================
-% SINR阈值列表（dB）- 减少至5个典型点以增加统计可靠性
-gamma_th_dB_list = [-5, 0, 5, 10, 15];  % 5个典型点（原11点）
+% SINR阈值列表（dB）- 扩展到高阈值区域展示鲁棒算法的极限
+gamma_th_dB_list = [-5, 0, 5, 10, 15, 20, 25, 30];  % 8个点，覆盖到设计余量边界
 % CSI反馈周期列表（ms）- 保留5个典型场景
 T_list = [0.2, 0.6, 1.0, 1.4, 1.8];  % 5个典型场景
 % 车速（km/h）
@@ -72,7 +72,7 @@ dB_sig2 = -114; % 噪声功率（dBm）
 numLane = 6;    % 车道数量
 laneWidth = 4;  % 车道宽度（m）
 
-p0 = 0.05;      % V2V目标中断概率（设计值）
+p0 = 1e-4;      % V2V目标中断概率（Markov 上界设计值）
 dB_gamma0 = 5;  % V2V设计SINR阈值（dB）
 
 %% =================================================================
@@ -369,13 +369,21 @@ outage_prob_robust_raw = outage_prob(:, :, 1);
 outage_prob_nonrobust_raw = outage_prob(:, :, 2);
 
 %% =================================================================
+%%  保存仿真数据（供 thesis_figures.m 重绘）
+%% =================================================================
+save(fullfile(outputFolder, 'sim_05_data.mat'), ...
+    'gamma_th_dB_list', 'T_list', ...
+    'outage_prob_robust_raw', 'outage_prob_nonrobust_raw', ...
+    'channNum', 'v', 'numCUE');
+
+%% =================================================================
 %%  绘图
 %% =================================================================
 LineWidth = 1.5;
 LineWidthNR = 2.0;  % 非鲁棒算法线宽加粗
 MarkerSize = 9;
-FontSize = 12;
-FontName = 'SimHei';
+FontSize = 10.5;
+FontName = 'SimSun';
 
 % 配色方案：蓝（鲁棒，从浅到深）、红（非鲁棒，从浅到深）
 colors_robust = [0.7 0.85 1.0; 0.5 0.7 0.9; 0.3 0.55 0.8; 0.15 0.4 0.7; 0.0 0.25 0.6];
@@ -407,21 +415,18 @@ for t_idx = 1 : n_T
     hold(ax1, 'on');
 end
 
-xlabel('SINR阈值 \gamma_{th} (dB)', 'FontName', FontName, 'FontSize', FontSize + 2, 'FontWeight', 'bold');
-ylabel('V2V中断概率 P_{out}', 'FontName', FontName, 'FontSize', FontSize + 2, 'FontWeight', 'bold');
+xlabel('SINR阈值 \gamma_{th} (dB)', 'FontName', FontName, 'FontSize', FontSize);
+ylabel('V2V中断概率 P_{out}', 'FontName', FontName, 'FontSize', FontSize);
 ylim([1e-3, 1]);  % 完整范围
-xlim([-6, 16]);
+xlim([-6, 32]);
 
 % 添加垂直参考线
 xline(ax1, 5, '--k', 'LineWidth', 1, 'Label', 'SINR=5dB', ...
-    'LabelHorizontalAlignment', 'center', 'FontName', FontName, 'FontSize', 10);
+    'LabelHorizontalAlignment', 'center', 'FontName', FontName, 'FontSize', 9);
 
 legend_str_robust = arrayfun(@(t) sprintf('T=%.1f ms', t), T_list, 'UniformOutput', false);
-legend(ax1, legend_str_robust, 'FontName', FontName, 'FontSize', FontSize, ...
-    'Location', 'southwest', 'Box', 'off');
-
-title(ax1, {'(a) 鲁棒算法', '(CSI延迟越大，中断概率越低，性能越好)'}, ...
-    'FontName', FontName, 'FontSize', FontSize + 1);
+legend(ax1, legend_str_robust, 'FontName', FontName, 'FontSize', 9, ...
+    'Location', 'northwest', 'Box', 'off');
 hold(ax1, 'off');
 
 % ==================================================================
@@ -444,40 +449,31 @@ for t_idx = 1 : n_T
     hold(ax2, 'on');
 end
 
-xlabel('SINR阈值 \gamma_{th} (dB)', 'FontName', FontName, 'FontSize', FontSize + 2, 'FontWeight', 'bold');
-ylabel('V2V中断概率 P_{out}', 'FontName', FontName, 'FontSize', FontSize + 2, 'FontWeight', 'bold');
+xlabel('SINR阈值 \gamma_{th} (dB)', 'FontName', FontName, 'FontSize', FontSize);
+ylabel('V2V中断概率 P_{out}', 'FontName', FontName, 'FontSize', FontSize);
 ylim([1e-3, 1]);
-xlim([-6, 16]);
+xlim([-6, 32]);
 
 % 添加垂直参考线
 xline(ax2, 5, '--k', 'LineWidth', 1, 'Label', 'SINR=5dB', ...
-    'LabelHorizontalAlignment', 'center', 'FontName', FontName, 'FontSize', 10);
+    'LabelHorizontalAlignment', 'center', 'FontName', FontName, 'FontSize', 9);
 
 legend_str_nonrobust = arrayfun(@(t) sprintf('T=%.1f ms', t), T_list, 'UniformOutput', false);
-legend(ax2, legend_str_nonrobust, 'FontName', FontName, 'FontSize', FontSize, ...
+legend(ax2, legend_str_nonrobust, 'FontName', FontName, 'FontSize', 9, ...
     'Location', 'northwest', 'Box', 'off');
-
-title(ax2, {'(b) 非鲁棒算法', '(CSI延迟越大，中断概率越高，性能越差)'}, ...
-    'FontName', FontName, 'FontSize', FontSize + 1);
 hold(ax2, 'off');
 
-% ==================================================================
-%  总标题（使用sgtitle避免文字重叠）
-% ==================================================================
-sgtitle({'SINR阈值与CSI延迟对V2V中断概率的联合影响', ...
-    '(v = 100 km/h, N = 20)'}, ...
-    'FontName', FontName, 'FontSize', FontSize + 3, 'FontWeight', 'bold');
-
 % 输出图像
-print('-dpng', '-r300', fullfile(outputFolder, 'sim_05_SINR_Threshold_Outage.png'));
-print('-dpdf', '-r300', fullfile(outputFolder, 'sim_05_SINR_Threshold_Outage.pdf'));
+setThesisFont(gcf);
+print('-dpng', '-r600', fullfile(outputFolder, 'sim_05_SINR_Threshold_Outage.png'));
+print('-dpdf', '-r600', fullfile(outputFolder, 'sim_05_SINR_Threshold_Outage.pdf'));
 fprintf('图已保存: %s/sim_05_SINR_Threshold_Outage.png / .pdf\n', outputFolder);
 
 %% =================================================================
 %%  打印数值结果
 %% =================================================================
 fprintf('\n===== V2V中断概率结果（原始仿真数据）=====\n');
-fprintf('行: gamma_th = [-5, 0, 5, 10, 15] dB\n');
+fprintf('行: gamma_th = [-5, 0, 5, 10, 15, 20, 25, 30] dB\n');
 fprintf('列: T = [0.2, 0.6, 1.0, 1.4, 1.8] ms\n');
 disp('鲁棒算法中断概率(原始):');
 disp(outage_prob_robust_raw);

@@ -1,5 +1,4 @@
 % 诊断脚本：检查calOptPower各Case触发情况和功率分配
-addpath('E:\桌面常用\毕设\bs_matlab备份');
 fastMode = true;
 
 %% 参数

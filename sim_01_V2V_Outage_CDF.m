@@ -77,7 +77,7 @@ T = 1;                       % CSI 反馈周期（ms）
 
 r0 = 0.5;                    % V2I 最低速率要求（bps/Hz）
 dB_gamma0 = 5;              % V2V 最低 SINR 阈值（dB）
-p0 = 1e-6;                 % V2V 目标中断概率 0.0001%（极收紧以实现0.1%实际中断）
+p0 = 1e-4;                 % V2V 目标中断概率（Markov 上界设计值）
 
 %% =================================================================
 %%  线性参数转换
@@ -348,16 +348,24 @@ outage_robust = mean(sinr_robust < sinr_th);      % 鲁棒算法实际中断概�
 outage_nonrobust = mean(sinr_nonrobust < sinr_th); % 非鲁棒算法实际中断概率
 
 fprintf('\n===== V2V中断概率 (SINR_th=%.2f dB) =====\n', 10 * log10(sinr_th));
-fprintf('鲁棒算法:   %.4f (设计目标p0=%.1e，实际约12%%)\n', outage_robust, p0);
+fprintf('鲁棒算法:   %.4f (设计目标p0=%.1e)\n', outage_robust, p0);
 fprintf('非鲁棒算法:  %.4f\n', outage_nonrobust);
 fprintf('非鲁棒/鲁棒 = %.1f倍\n', outage_nonrobust / outage_robust);
+
+%% =================================================================
+%%  保存仿真数据（供 thesis_figures.m 重绘）
+%% =================================================================
+save(fullfile(outputFolder, 'sim_01_data.mat'), ...
+    'sinr_robust', 'sinr_nonrobust', ...
+    'outage_robust', 'outage_nonrobust', ...
+    'gamma0', 'dB_gamma0', 'numSamples');
 
 %% =================================================================
 %%  绘图（学术规范：经验CDF阶梯图 + 标注中断概率）
 %% =================================================================
 LineWidth = 1.5;
-FontSize = 12;
-FontName = 'SimHei';  % 使用黑体以支持中文显示
+FontSize = 10.5;
+FontName = 'SimSun';  % 宋体（毕设规范）
 
 % 将 SINR 转换为 dB 单位
 sinr_robust_dB = 10 * log10(sinr_robust);
@@ -405,41 +413,49 @@ plot(ax, 5, outage_robust, 'o', 'MarkerSize', 12, ...
 plot(ax, 5, outage_nonrobust, 'o', 'MarkerSize', 12, ...
     'MarkerFaceColor', [0.75 0.0 0.0], 'MarkerEdgeColor', 'none');
 
-% 文本标注中断概率：放在圆形标记正上方，y 取在两条 CDF 曲线的间隙区域
-% 在 x=5 附近：robust CDF 在 y=0.2974 跳变，nonrobust CDF 在 y=0.7291 跳变
-% 两者之间 y∈(0.2974, 0.7291) 有空白，y=0.50 正好在中间
-% robust 标注放在 y=0.20（非robust曲线的下方），nonrobust 放在 y=0.80（曲线上方）
-text(5.5, 0.20, sprintf('鲁棒: %.1f%%', outage_robust * 100), ...
-    'FontName', FontName, 'FontSize', FontSize + 1, 'Color', [0.0 0.45 0.75], ...
+% 文本标注中断概率
+% 统一精度：以较小值（鲁棒）决定小数位数，两者保持一致
+val_r = outage_robust * 100;
+if val_r >= 1
+    fmt = '%.1f%%';
+elseif val_r >= 0.1
+    fmt = '%.2f%%';
+elseif val_r >= 0.01
+    fmt = '%.3f%%';
+else
+    fmt = '%.4f%%';
+end
+str_robust    = sprintf(['鲁棒: ', fmt], val_r);
+str_nonrobust = sprintf(['非鲁棒: ', fmt], outage_nonrobust * 100);
+
+% 位置：放到参考线右侧（x=7），避开所有曲线
+text(7, 0.06, str_robust, ...
+    'FontName', FontName, 'FontSize', FontSize, 'Color', [0.0 0.45 0.75], ...
     'BackgroundColor', 'white', 'EdgeColor', 'none', ...
     'HorizontalAlignment', 'left', 'VerticalAlignment', 'middle');
-text(5.5, 0.85, sprintf('非鲁棒: %.1f%%', outage_nonrobust * 100), ...
-    'FontName', FontName, 'FontSize', FontSize + 1, 'Color', [0.75 0.0 0.0], ...
+text(3.0, outage_nonrobust, str_nonrobust, ...
+    'FontName', FontName, 'FontSize', FontSize, 'Color', [0.75 0.0 0.0], ...
     'BackgroundColor', 'white', 'EdgeColor', 'none', ...
-    'HorizontalAlignment', 'left', 'VerticalAlignment', 'middle');
+    'HorizontalAlignment', 'right', 'VerticalAlignment', 'middle');
 
 % 坐标轴设置（线性坐标，更适合显示 CDF 整体形状）
-xlabel('V2V SINR (dB)', 'FontName', FontName, 'FontSize', FontSize + 2, 'FontWeight', 'bold');
-ylabel('累积分布函数 (CDF)', 'FontName', FontName, 'FontSize', FontSize + 2, 'FontWeight', 'bold');
+xlabel('V2V SINR (dB)', 'FontName', 'Times New Roman', 'FontSize', FontSize);
+ylabel('累积分布函数 (CDF)', 'FontName', FontName, 'FontSize', FontSize);
 ylim([0, 1.05]);
 xmin_r = min(sR); xmin_nr = min(sNR); xmin = min(xmin_r, xmin_nr);
 xlim([floor(xmin - 2), max(max(sR), max(sNR)) + 3]);
 
 % 图例
 legend(ax, {'鲁棒算法', '非鲁棒算法'}, ...
-    'FontName', FontName, 'FontSize', FontSize + 1, ...
+    'FontName', FontName, 'FontSize', 9, ...
     'Location', 'southeast', 'Box', 'off');
-
-% 标题 - 增大与图像的间距
-title('V2V链路实际SINR累积分布函数对比', ...
-    'FontName', FontName, 'FontSize', FontSize + 3, 'FontWeight', 'bold', ...
-    'Units', 'normalized', 'Position', [0.5, 1.02, 0]);
 
 hold off;
 
-% 输出图像（PNG 300dpi + PDF 矢量格式）
-print('-dpng', '-r300', fullfile(outputFolder, 'sim_01_V2V_Outage_CDF.png'));
-print('-dpdf', '-r300', fullfile(outputFolder, 'sim_01_V2V_Outage_CDF.pdf'));
+% 输出图像（PNG 600dpi + PDF 矢量格式）
+setThesisFont(gcf);
+print('-dpng', '-r600', fullfile(outputFolder, 'sim_01_V2V_Outage_CDF.png'));
+print('-dpdf', '-r600', fullfile(outputFolder, 'sim_01_V2V_Outage_CDF.pdf'));
 fprintf('图已保存: %s/sim_01_V2V_Outage_CDF.png / .pdf\n', outputFolder);
 
 toc

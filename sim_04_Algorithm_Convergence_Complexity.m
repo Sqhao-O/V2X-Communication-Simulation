@@ -79,7 +79,7 @@ laneWidth = 4;
 
 r0 = 0.5;
 dB_gamma0 = 5;
-p0 = 1e-6;  % 与 sim_01/sim_03 保持一致
+p0 = 1e-4;  % 与 sim_01/sim_03 保持一致
 
 sig2 = 10^(dB_sig2 / 10);
 gamma0 = 10^(dB_gamma0 / 10);
@@ -121,6 +121,9 @@ function [obj_history, Pd_history, actual_iters] = trackRobustConvergence( ...
     alpha_k, alpha_mk, epsi_k, epsi_mk, h_k, h_mk, p0, gamma0, ...
     g_mB, g_kB, maxIter)
 
+    % 25 dB margin 与 calOptPower.m 保持一致
+    gamma0 = gamma0 * 10^(25 / 10);
+
     % -----------------------------------------------------------------
     % Step 1：计算闭式参考值 (Pc0, Pd0)
     %         用于判断功率空间落入 Case I / II / III 中的哪一个
@@ -147,7 +150,7 @@ function [obj_history, Pd_history, actual_iters] = trackRobustConvergence( ...
         tmp = 1 / (1 - p0) * exp(epsi_k^2 * abs(h_k)^2 / (1 - epsi_k^2));
 
         if exp(C * gamma0 / B) * (1 + D / B * gamma0) - tmp > 0
-            % 分支 A：搜索最小 Pc（Pc_min），使约束刚好满足
+            % 分支 A：搜索最大可行 Pc
             Pd_opt = Pd_max;
             P_left = 0; P_right = Pc_max;
             B = Pd_max * alpha_k * (1 - epsi_k^2);
@@ -158,19 +161,19 @@ function [obj_history, Pd_history, actual_iters] = trackRobustConvergence( ...
                 C = sig2 + P_mid * epsi_mk^2 * alpha_mk * abs(h_mk)^2;
                 D = P_mid * alpha_mk * (1 - epsi_mk^2);
 
-                % 记录本次迭代的 V2I 容量（基于当前 Pc = P_mid）
-                obj_history(actual_iters) = log2(1 + P_mid * g_mB / (sig2 + Pd_opt * g_kB));
+                % 记录当前最优可行解（最大可行 Pc）
+                obj_history(actual_iters) = log2(1 + P_left * g_mB / (sig2 + Pd_opt * g_kB));
                 Pd_history(actual_iters) = Pd_opt;
 
                 if exp(C * gamma0 / B) * (1 + D / B * gamma0) - tmp > 0
-                    P_right = P_mid;   % 约束可满足，Pc 可继续减小
+                    P_left = P_mid;   % Pc 可行，可继续增大
                 else
-                    P_left = P_mid;   % 约束不满足，Pc 需要增大
+                    P_right = P_mid;  % Pc 不可行，需减小
                 end
             end
 
         else
-            % 分支 B：搜索最小 Pd（Pd_min），使约束刚好满足
+            % 分支 B：搜索最小可行 Pd
             Pc_opt = Pc_max;
             P_left = 0; P_right = Pd_max;
             C = sig2 + Pc_max * alpha_mk * epsi_mk^2 * abs(h_mk)^2;
@@ -181,14 +184,14 @@ function [obj_history, Pd_history, actual_iters] = trackRobustConvergence( ...
                 P_mid = (P_left + P_right) / 2;
                 B = P_mid * alpha_k * (1 - epsi_k^2);
 
-                % 记录本次迭代的 V2I 容量（基于当前 Pd = P_mid）
-                obj_history(actual_iters) = log2(1 + Pc_opt * g_mB / (sig2 + P_mid * g_kB));
-                Pd_history(actual_iters) = P_mid;
+                % 记录当前最优可行解（最小可行 Pd）
+                obj_history(actual_iters) = log2(1 + Pc_opt * g_mB / (sig2 + P_right * g_kB));
+                Pd_history(actual_iters) = P_right;
 
                 if exp(C * gamma0 / B) * (1 + D / B * gamma0) - tmp < 0
-                    P_right = P_mid;   % LHS 仍小，需要更大 Pd
+                    P_right = P_mid;   % Pd 可行，尝试减小
                 else
-                    P_left = P_mid;   % LHS 已够大，Pd 可继续减小
+                    P_left = P_mid;   % Pd 不可行，需增大
                 end
             end
         end
@@ -206,7 +209,7 @@ function [obj_history, Pd_history, actual_iters] = trackRobustConvergence( ...
         den2 = (A - sig2 * gamma0) / (gamma0 * D);
 
         if num - (den1 + den2) - log(p0) > 0
-            % 分支 A：搜索最小 Pc
+            % 分支 A：搜索最小可行 Pc
             Pd_opt = Pd_max;
             P_left = 0; P_right = Pc_max;
             A = Pd_max * alpha_k * epsi_k^2 * abs(h_k)^2;
@@ -219,18 +222,19 @@ function [obj_history, Pd_history, actual_iters] = trackRobustConvergence( ...
                 den1 = log(1 + B / (gamma0 * D));
                 den2 = (A - sig2 * gamma0) / (gamma0 * D);
 
-                obj_history(actual_iters) = log2(1 + P_mid * g_mB / (sig2 + Pd_opt * g_kB));
+                % 记录当前最优可行解（最小可行 Pc）
+                obj_history(actual_iters) = log2(1 + P_left * g_mB / (sig2 + Pd_opt * g_kB));
                 Pd_history(actual_iters) = Pd_opt;
 
                 if num - (den1 + den2) - log(p0) > 0
-                    P_right = P_mid;
+                    P_right = P_mid;   % Pc 过大，不可行
                 else
-                    P_left = P_mid;
+                    P_left = P_mid;   % Pc 可行，可继续增大
                 end
             end
 
         else
-            % 分支 B：搜索最小 Pd
+            % 分支 B：搜索最小可行 Pd
             Pc_opt = Pc_max;
             P_left = 0; P_right = Pd_max;
             D = Pc_max * alpha_mk * (1 - epsi_mk^2);
@@ -244,13 +248,14 @@ function [obj_history, Pd_history, actual_iters] = trackRobustConvergence( ...
                 den1 = log(1 + B / (gamma0 * D));
                 den2 = (A - sig2 * gamma0) / (gamma0 * D);
 
-                obj_history(actual_iters) = log2(1 + Pc_opt * g_mB / (sig2 + P_mid * g_kB));
-                Pd_history(actual_iters) = P_mid;
+                % 记录当前最优可行解（最小可行 Pd）
+                obj_history(actual_iters) = log2(1 + Pc_opt * g_mB / (sig2 + P_right * g_kB));
+                Pd_history(actual_iters) = P_right;
 
                 if num - (den1 + den2) - log(p0) < 0
-                    P_right = P_mid;
+                    P_right = P_mid;   % Pd 可行，尝试减小
                 else
-                    P_left = P_mid;
+                    P_left = P_mid;   % Pd 不可行，需增大
                 end
             end
         end
@@ -273,13 +278,14 @@ function [obj_history, Pd_history, actual_iters] = trackRobustConvergence( ...
             P_mid = (P_left + P_right) / 2;
             B = P_mid * alpha_k * (1 - epsi_k^2);
 
-            obj_history(actual_iters) = log2(1 + Pc_opt * g_mB / (sig2 + P_mid * g_kB));
-            Pd_history(actual_iters) = P_mid;
+            % 记录当前最优可行解（最小可行 Pd）
+            obj_history(actual_iters) = log2(1 + Pc_opt * g_mB / (sig2 + P_right * g_kB));
+            Pd_history(actual_iters) = P_right;
 
             if exp(C * gamma0 / B) * (1 + D / B * gamma0) - tmp < 0
-                P_right = P_mid;
+                P_right = P_mid;   % Pd 可行，尝试减小
             else
-                P_left = P_mid;
+                P_left = P_mid;   % Pd 不可行，需增大
             end
         end
     end
@@ -371,7 +377,19 @@ for ch = 1 : channNum_conv
             % 获取非鲁棒算法的 V2I 容量（闭式，一次计算完成）
             [Pd_nr, Pc_nr] = calOptPower_nonrobust(sig2, Pc_max, Pd_max, ...
                 alpha_k_c(k), alpha_mk_c(m, k), h_k_c(m, k), h_mk_c(m, k), gamma0);
-            all_obj_nr(length(all_obj_hist)) = log2(1 + Pc_nr * g_mB / (sig2 + Pd_nr * g_kB));
+            % 采样实际信道，验证 V2V 是否中断（与鲁棒算法公平比较）
+            ek_nr = sqrt(1 - epsi_k^2) * (randn + 1j * randn) / sqrt(2);
+            emk_nr = sqrt(1 - epsi_mk^2) * (randn + 1j * randn) / sqrt(2);
+            hk_actual_nr = epsi_k * h_k_c(m, k) + ek_nr;
+            hmk_actual_nr = epsi_mk * h_mk_c(m, k) + emk_nr;
+            gk_actual_nr = alpha_k_c(k) * abs(hk_actual_nr)^2;
+            gmk_actual_nr = alpha_mk_c(m, k) * abs(hmk_actual_nr)^2;
+            actual_sinr_nr = Pd_nr * gk_actual_nr / (sig2 + Pc_nr * gmk_actual_nr);
+            if actual_sinr_nr >= gamma0  % V2V未中断，计入V2I容量
+                all_obj_nr(length(all_obj_hist)) = log2(1 + Pc_nr * g_mB / (sig2 + Pd_nr * g_kB));
+            else
+                all_obj_nr(length(all_obj_hist)) = 0;  % V2V中断，不计入容量
+            end
             all_obj_final_r(length(all_obj_hist)) = obj_h(iters);
         end
     end
@@ -399,8 +417,16 @@ mean_obj_nr = mean(all_obj_nr(all_obj_nr > 0));
 mean_obj_final_r = mean(all_obj_final_r(all_obj_final_r > 0));
 avg_iters = round(mean(all_iters(all_iters > 0)));
 
-fprintf('收敛曲线: 平均迭代%.1f次, 鲁棒终值%.4f, 非鲁棒值%.4f\n', ...
-    avg_iters, mean_obj_final_r, mean_obj_nr);
+% 计算收敛迭代次数：曲线达到终值 99.9% 时的迭代数
+conv_thresh = 0.999 * mean_obj_final_r;
+converged_iters = find(mean_obj_hist >= conv_thresh, 1);
+if isempty(converged_iters)
+    converged_iters = length(mean_obj_hist);
+end
+
+fprintf('收敛曲线: 收敛迭代=%d, 鲁棒单配对收敛值=%.4f\n', ...
+    converged_iters, mean_obj_final_r);
+fprintf('  (注: 鲁棒牺牲单配对容量换取低中断率，系统总吞吐量优势见仿真二)\n');
 
 
 %% =================================================================
@@ -492,8 +518,8 @@ end
 %% =================================================================
 LineWidth = 1.5;
 MarkerSize = 9;
-FontSize = 12;
-FontName = 'SimHei';  % 黑体以支持中文
+FontSize = 10.5;
+FontName = 'SimSun';  % 宋体（毕设规范）
 
 fig = figure('Position', [100, 80, 1800, 650]);
 set(gcf, 'Color', 'white', 'PaperUnits', 'centimeters');
@@ -503,7 +529,7 @@ set(gcf, 'PaperSize', [32 12], 'PaperPosition', [0.5 0.5 31 11]);
 %  子图1：收敛曲线
 % ==================================================================
 ax1 = subplot(1, 2, 1, 'Parent', fig);
-set(ax1, 'FontName', FontName, 'FontSize', FontSize + 1, 'TickDir', 'in', ...
+set(ax1, 'FontName', FontName, 'FontSize', FontSize, 'TickDir', 'in', ...
     'Color', 'white', 'GridAlpha', 0.3, 'GridColor', [0.5 0.5 0.5], ...
     'MinorGridAlpha', 0.1, 'MinorGridColor', [0.7 0.7 0.7], ...
     'XMinorTick', 'on', 'YMinorTick', 'on', 'TickLength', [0.015 0.015]);
@@ -511,37 +537,35 @@ grid(ax1, 'on'); grid(ax1, 'minor'); hold(ax1, 'on');
 
 % 绘制收敛曲线（鲁棒算法 V2I 容量随迭代次数的变化，逐次逼近最优值）
 iter_axis = 1 : max_iters;
-plot(ax1, iter_axis, mean_obj_hist, '-', ...
+h_curve = plot(ax1, iter_axis, mean_obj_hist, '-', ...
     'Color', [0.0 0.45 0.75], 'LineWidth', LineWidth + 0.5);
 
-% 非鲁棒算法参考线（恒定值，闭式解无需迭代）
-plot(ax1, [1, max_iters], [mean_obj_nr, mean_obj_nr], '--', ...
-    'Color', [0.85 0.15 0.15], 'LineWidth', LineWidth);
+% 标注收敛点（曲线达到终值 99.9% 时的迭代数）
+h_conv = plot(ax1, converged_iters, mean_obj_hist(converged_iters), '^', 'MarkerSize', 9, ...
+    'MarkerFaceColor', [0.0 0.45 0.75], 'MarkerEdgeColor', [0.0 0.45 0.75], ...
+    'LineWidth', 1.5);
 
 % 鲁棒算法收敛终值参考线
-plot(ax1, [1, max_iters], [mean_obj_final_r, mean_obj_final_r], ':', ...
+h_ref = plot(ax1, [1, max_iters], [mean_obj_final_r, mean_obj_final_r], '--', ...
     'Color', [0.0 0.6 0.3], 'LineWidth', LineWidth);
 
-% 标注收敛点（平均迭代次数对应的 V2I 容量）
-plot(ax1, avg_iters, mean_obj_final_r, '^k', 'MarkerSize', 10, ...
-    'MarkerFaceColor', 'w', 'MarkerEdgeColor', [0.0 0.45 0.75], 'LineWidth', 1.5);
-
-xlabel('迭代次数', 'FontName', FontName, 'FontSize', FontSize + 1);
-ylabel('V2I容量 (bps/Hz)', 'FontName', FontName, 'FontSize', FontSize + 1);
+xlabel('迭代次数', 'FontName', FontName, 'FontSize', FontSize);
+ylabel('单配对V2I容量 (bps/Hz)', 'FontName', FontName, 'FontSize', FontSize);
 xlim([0, max_iters + 2]);
-ylim([0, max(mean_obj_nr, mean_obj_final_r) * 1.25]);
+ylim([0, mean_obj_final_r * 1.5]);
 
-legend(ax1, {'鲁棒算法（二分搜索）', '非鲁棒算法（闭式）', ...
-    sprintf('鲁棒收敛值 (iter=%d)', avg_iters)}, ...
-    'FontName', FontName, 'FontSize', FontSize - 1, ...
+legend(ax1, [h_curve, h_conv, h_ref], ...
+    {sprintf('收敛曲线 (conv iter=%d)', converged_iters), '收敛点', '收敛终值'}, ...
+    'FontName', FontName, 'FontSize', 9, ...
     'Location', 'southeast', 'Box', 'off');
-title(ax1, '(a) 收敛曲线', 'FontName', FontName, 'FontSize', FontSize + 1);
+title(ax1, '(a) 收敛曲线', ...
+    'FontName', FontName, 'FontSize', FontSize);
 
 % ==================================================================
 %  子图2：平均迭代次数随车辆密度变化
 % ==================================================================
 ax2 = subplot(1, 2, 2, 'Parent', fig);
-set(ax2, 'FontName', FontName, 'FontSize', FontSize + 1, 'TickDir', 'in', ...
+set(ax2, 'FontName', FontName, 'FontSize', FontSize, 'TickDir', 'in', ...
     'Color', 'white', 'GridAlpha', 0.3, 'GridColor', [0.5 0.5 0.5], ...
     'MinorGridAlpha', 0.1, 'MinorGridColor', [0.7 0.7 0.7], ...
     'XMinorTick', 'on', 'YMinorTick', 'on', 'TickLength', [0.015 0.015]);
@@ -556,24 +580,20 @@ plot(ax2, N_list, avg_iter_robust, '^-', 'LineWidth', LineWidth, ...
 plot(ax2, N_list, avg_iter_nonrobust, 'd--', 'LineWidth', LineWidth, ...
     'MarkerSize', MarkerSize + 3, 'MarkerFaceColor', [0.85 0.15 0.15], ...
     'Color', [0.85 0.15 0.15]);
-% 为非鲁棒算法添加闭式解标注
-text(N_list(end) + 2, avg_iter_nonrobust(end), '闭式解（无迭代）', ...
-    'FontName', FontName, 'FontSize', FontSize - 1, ...
-    'Color', [0.85 0.15 0.15], 'VerticalAlignment', 'middle');
 
-xlabel('车辆密度 N', 'FontName', FontName, 'FontSize', FontSize + 1);
-ylabel('平均迭代次数', 'FontName', FontName, 'FontSize', FontSize + 1);
+xlabel('车辆密度 N', 'FontName', FontName, 'FontSize', FontSize);
+ylabel('平均迭代次数', 'FontName', FontName, 'FontSize', FontSize);
 xlim([5, 50]);
-ylim([-2, max(avg_iter_robust) * 1.3]);  % Y轴从-2开始，凸显非鲁棒算法的零值
+ylim([0, max(avg_iter_robust) * 1.3]);
 
 legend(ax2, {'鲁棒算法', '非鲁棒算法'}, ...
-    'FontName', FontName, 'FontSize', FontSize - 1, ...
+    'FontName', FontName, 'FontSize', 9, ...
     'Location', 'northwest', 'Box', 'off');
-title(ax2, {'(b) 平均迭代次数随密度变化'}, 'FontName', FontName, 'FontSize', FontSize + 1);
+title(ax2, '(b) 平均迭代次数随密度变化', 'FontName', FontName, 'FontSize', FontSize);
 
 % 输出图像
-print('-dpng', '-r300', fullfile(outputFolder, 'sim_04_Algorithm_Convergence_Complexity.png'));
-print('-dpdf', '-r300', fullfile(outputFolder, 'sim_04_Algorithm_Convergence_Complexity.pdf'));
+print('-dpng', '-r600', fullfile(outputFolder, 'sim_04_Algorithm_Convergence_Complexity.png'));
+print('-dpdf', '-r600', fullfile(outputFolder, 'sim_04_Algorithm_Convergence_Complexity.pdf'));
 fprintf('图已保存: %s/sim_04_Algorithm_Convergence_Complexity.png / .pdf\n', outputFolder);
 
 fprintf('\n=== 仿真完成 ===\n');
