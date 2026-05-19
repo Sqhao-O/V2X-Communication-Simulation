@@ -17,36 +17,41 @@ function setThesisFont(figHandle)
     labelHandles = [];  % 收集标签句柄，供第4步排除
     for k = 1 : length(allAxes)
         ax = allAxes(k);
-        % 刻度字体：Times New Roman 10.5pt + Box封闭 + 刻度朝内
+        % 刻度字体：Times New Roman 10.5pt + Box封闭 + 刻度朝内 + 黑色坐标轴
         set(ax, 'FontName', 'Times New Roman', 'FontSize', 10.5, ...
-            'Box', 'on', 'TickDir', 'in', 'LineWidth', 0.5);
+            'FontWeight', 'normal', ...
+            'Box', 'on', 'TickDir', 'in', 'LineWidth', 0.5, ...
+            'XColor', 'k', 'YColor', 'k');
 
         % XLabel
-        xlh = get(ax, 'XLabel');
-        if isvalid(xlh)
+        try
+            xlh = get(ax, 'XLabel');
             setLabelFont(xlh);
             labelHandles = [labelHandles; xlh];
+        catch
         end
 
         % YLabel
-        ylh = get(ax, 'YLabel');
-        if isvalid(ylh)
+        try
+            ylh = get(ax, 'YLabel');
             setLabelFont(ylh);
             labelHandles = [labelHandles; ylh];
+        catch
         end
 
         % Title
-        th = get(ax, 'Title');
-        if isvalid(th)
+        try
+            th = get(ax, 'Title');
             setLabelFont(th);
             labelHandles = [labelHandles; th];
+        catch
         end
     end
 
-    % ---- 3. 图例：统一 SimSun 9pt（图例含中英文混合）----
+    % ---- 3. 图例：统一 SimSun 9pt + 黑色文字（图例含中英文混合）----
     allLegends = findall(figHandle, 'Type', 'legend');
     for k = 1 : length(allLegends)
-        set(allLegends(k), 'FontName', 'SimSun', 'FontSize', 9);
+        set(allLegends(k), 'FontName', 'SimSun', 'FontSize', 9, 'TextColor', 'k');
     end
 
     % ---- 4. 所有 text 对象（排除坐标轴标签和标题）----
@@ -91,9 +96,9 @@ function setLabelFont(h)
         str = strjoin(str, ' ');
     end
     if hasChinese(str)
-        set(h, 'FontName', 'SimSun', 'FontSize', 10.5);
+        set(h, 'FontName', 'SimSun', 'FontSize', 10.5, 'FontWeight', 'normal', 'Color', 'k');
     else
-        set(h, 'FontName', 'Times New Roman', 'FontSize', 10.5);
+        set(h, 'FontName', 'Times New Roman', 'FontSize', 10.5, 'FontWeight', 'normal', 'Color', 'k');
     end
 end
 
